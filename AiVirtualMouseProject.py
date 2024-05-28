@@ -1,113 +1,128 @@
-# import cv2
-# import numpy as np
-# import time
-# from module import HandTrackingModule as htm
-
-
-
-
-# ##############################
-# wCam, hCam = 640, 480
-# ##############################
-
-# cap = cv2.VideoCapture(0)
-# cap.set(3, wCam)
-# cap.set(4, hCam)
-# pTime = 0
-# detector = htm.handDetector(maxHands=1)
-
-
-# while True:
-#     # 1. Finding hand Landmarks
-#     success, img = cap.read()
-#     img = detector.findHands(img)
-#     lmList, bbox = detector.findPosition(img)
-        
-#     # 2. Get the tip of the index and middle fingers
-#     # 3. Check which fingers are up
-#     # 4. Only Index Finger : Moving Mode
-#         # 5. Convert Coordinates
-#     # 6. Smoothen Values
-#     # 7. Move Mouse
-#     # 8. Both Index and middle fingers are up : Clicking Mode
-#     # 9. Find distance between fingers
-#     # 10. Click mouse if distance short
-    
-#     # 11. Frame Rate
-#     cTime =time.time()
-#     fps = 1/(cTime-pTime)
-#     pTime = cTime
-#     cv2.putText(img, str(int(fps)), (20, 50), cv2.FONT_HERSHEY_PLAIN, 3,
-#                 (255, 0, 0), 3)
-#     # 12. Display
-#     cv2.imshow("Image", img)
-    
-#     cv2.waitKey(1)
-
 import cv2
 import numpy as np
-import mediapipe as mp
 import time
+import mediapipe as mp
 import pyautogui
-from module import HandTrackingModule as htm  # HandTrackingModule을 htm으로 import
 
-# 웹캠 설정
+
+
+##############################
 wCam, hCam = 640, 480
-frameR = 100  # 프레임 감소
-smoothening = 7
+##############################
 
 cap = cv2.VideoCapture(0)
 cap.set(3, wCam)
 cap.set(4, hCam)
 pTime = 0
-plocX, plocY = 0, 0
-clocX, clocY = 0, 0
 
-detector = htm.HandDetector(maxHands=1)
-wScr, hScr = pyautogui.size()
+def calculate_angle(a, b, c):
+    a = np.array(a)  # 첫 번째 점
+    b = np.array(b)  # 중앙 점
+    c = np.array(c)  # 마지막 점
+    
+    # 벡터 계산
+    ba = a - b
+    bc = c - b
+    
+    # 코사인 법칙을 사용하여 각도 계산
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    angle = np.arccos(cosine_angle)
+    
+    return np.degrees(angle)
 
-while True:
-    success, img = cap.read()
-    if not success:
-        break
 
-    img = detector.find_hands(img)
-    lmList = detector.find_position(img, draw=False)
+# MediaPipe hands 모델 초기화
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands()
+mp_drawing = mp.solutions.drawing_utils
 
-    if len(lmList) != 0:
-        x1, y1 = lmList[8][1:]  # 검지 끝 좌표
-        x2, y2 = lmList[12][1:]  # 중지 끝 좌표
 
-        # 손가락이 위로 향했는지 확인
-        fingers = detector.fingers_up()
-        if fingers[1] == 1 and fingers[2] == 0:
-            # 화면 크기에 맞게 좌표 변환
-            x3 = np.interp(x1, (frameR, wCam - frameR), (0, wScr))
-            y3 = np.interp(y1, (frameR, hCam - frameR), (0, hScr))
+# Mediapipe Hands 솔루션 사용
+with mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=2,
+    min_detection_confidence=0.5) as hands:
+    
+    while cap.isOpened():
+        success, image = cap.read()
+        if not success:
+            print("Ignoring empty camera frame.")
+            continue
 
-            # 부드럽게 마우스 움직임 처리
-            clocX = plocX + (x3 - plocX) / smoothening
-            clocY = plocY + (y3 - plocY) / smoothening
+        # 이미지를 RGB로 변환
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image.flags.writeable = False
+        results = hands.process(image)
 
-            # 마우스 이동
-            pyautogui.moveTo(wScr - clocX, clocY)
-            plocX, plocY = clocX, clocY
+        # 이미지를 다시 BGR로 변환
+        image.flags.writeable = True
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-        # 클릭 모드
-        if fingers[1] == 1 and fingers[2] == 1:
-            length, img, lineInfo = detector.find_distance(8, 12, img)
-            if length < 40:
-                pyautogui.click()
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(
+                    image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-    # FPS 계산
-    cTime = time.time()
-    fps = 1 / (cTime - pTime)
-    pTime = cTime
-    cv2.putText(img, str(int(fps)), (20, 50), cv2.FONT_HERSHEY_PLAIN, 3, (255, 0, 0), 3)
+                # 손가락별로 구분하여 각 랜드마크 좌표 출력
+                for id, lm in enumerate(hand_landmarks.landmark):
+                    # 랜드마크 좌표를 이미지 크기에 맞게 조정
+                    h, w, c = image.shape
+                    cx, cy = int(lm.x * w), int(lm.y * h)
+                    
+                    # 각 손가락의 각도 계산 (엄지손가락을 제외한 네 손가락)
+                    if id in [8, 12, 16, 20]:
+                        # 손가락 끝 (Tip)
+                        tip = [hand_landmarks.landmark[id].x, hand_landmarks.landmark[id].y]
+                        # 손가락 중간 마디 (PIP)
+                        pip = [hand_landmarks.landmark[id - 2].x, hand_landmarks.landmark[id - 2].y]
+                        # 손가락 기저부 (MCP)
+                        mcp = [hand_landmarks.landmark[id - 3].x, hand_landmarks.landmark[id - 3].y]
 
-    cv2.imshow("Image", img)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+                        angle = calculate_angle(mcp, pip, tip)
 
-cap.release()
-cv2.destroyAllWindows()
+                        # 각도 출력 (예를 들어 160도 이상이면 손가락을 폈다고 간주)
+                        if id == 8 and angle > 160:
+                            pyautogui.position(cx, cy)
+                            #print(f"Finger {id // 4} is straight")
+                            
+                        elif id == 8 and angle < 160:
+                            pyautogui.click(cx, cy)
+                            #print(f"Finger {id // 4} is bent")
+                    
+                    
+                    
+                    # # 각 손가락에 해당하는 랜드마크를 출력
+                    # if id == 4:
+                        
+                    #     print("Thumb Tip: ", cx, cy)
+                    # elif id == 8:
+                    #     pyautogui.click(cx, cy)
+                    #     print("Index Finger Tip: ", cx, cy)
+                    # elif id == 12:
+                    #     print("Middle Finger Tip: ", cx, cy)
+                    # elif id == 16:
+                    #     print("Ring Finger Tip: ", cx, cy)
+                    # elif id == 20:
+                    #     print("Pinky Finger Tip: ", cx, cy)
+        cTime =time.time()
+        fps = 1/(cTime-pTime)
+        pTime = cTime
+        cv2.putText(image, str(int(fps)), (20, 50), cv2.FONT_HERSHEY_PLAIN, 3,
+                    (255, 0, 0), 3)
+        # 12. Display
+        cv2.imshow("Image", image)
+    
+        if cv2.waitKey(1) & 0xFF == 27:
+            break    
+    # 2. Get the tip of the index and middle fingers
+    # 3. Check which fingers are up
+    # 4. Only Index Finger : Moving Mode
+        # 5. Convert Coordinates
+    # 6. Smoothen Values
+    # 7. Move Mouse
+    # 8. Both Index and middle fingers are up : Clicking Mode
+    # 9. Find distance between fingers
+    # 10. Click mouse if distance short
+    
+    # 11. Frame Rate
+   
