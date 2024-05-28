@@ -70,7 +70,7 @@ with mp_hands.Hands(
                     cx, cy = int(lm.x * w), int(lm.y * h)
                     
                     # 각 손가락의 각도 계산 (엄지손가락을 제외한 네 손가락)
-                    if id in [8, 12, 16, 20]:
+                    if id == 8:
                         # 손가락 끝 (Tip)
                         tip = [hand_landmarks.landmark[id].x, hand_landmarks.landmark[id].y]
                         # 손가락 중간 마디 (PIP)
